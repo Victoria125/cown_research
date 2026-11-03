@@ -12,8 +12,8 @@ from src.load import PROCESSED_DIR, load_exposure, load_infection
 COLUMNS = [
     # colunas do exemplo do Gustavo
     "Agent", "barn", "date", "Exp", "LA", "RA", "INFECTED", "C", "I", "S", "N", "Ct",
-    # colunas extras, para decidir o que entra no GLM
-    "barn_move", "first_day", "days_since_prev", "at_risk",
+    # colunas extras, usadas para montar a tabela semanal (src/weekly.py)
+    "barn_move", "first_day", "days_since_prev", "at_risk", "legs_at_risk",
 ]
 
 
@@ -54,7 +54,8 @@ def add_status(df: pd.DataFrame) -> pd.DataFrame:
     - dia depois de um buraco na sequência: compara com o último dia observado,
       e days_since_prev mostra o tamanho do buraco;
     - vaca que se recupera: volta a S e pode virar C de novo depois;
-    - perna nova numa vaca que já estava infectada: Ct=1, mas C=0 e I=1.
+    - perna nova numa vaca que já estava infectada: Ct=1, mas C=0 e I=1;
+    - troca de perna no mesmo dia (uma sara e a outra adoece): também Ct=1, C=0.
     """
     df = df.sort_values(["Agent", "date"]).reset_index(drop=True)
     df["INFECTED"] = (df["LA"] | df["RA"]).astype(int)
@@ -62,8 +63,10 @@ def add_status(df: pd.DataFrame) -> pd.DataFrame:
     prev = df.groupby("Agent")[["date", "LA", "RA", "INFECTED"]].shift()
     df["first_day"] = prev["date"].isna()
     df["days_since_prev"] = (df["date"] - prev["date"]).dt.days.astype("Int64")
-    # em risco = saudável no dia anterior; é o denominador do GLM
+    # em risco = saudável no dia anterior. Não é o denominador da regressão diária: os
+    # casos só aparecem nas avaliações (quintas), por isso a regressão usa src/weekly.py
     df["at_risk"] = prev["INFECTED"].eq(0)
+    df["legs_at_risk"] = sum(prev[leg].eq(0).astype(int) for leg in ["LA", "RA"])
 
     df["C"] = (df["at_risk"] & df["INFECTED"].eq(1)).astype(int)
     df["I"] = (df["INFECTED"].eq(1) & df["C"].eq(0)).astype(int)

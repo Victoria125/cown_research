@@ -1,5 +1,6 @@
+"""Leitura dos arquivos brutos enviados pelo Gustavo (data/raw, que fica fora do git)."""
+
 from pathlib import Path
-from typing import cast
 
 import pandas as pd
 
@@ -15,10 +16,10 @@ def load_infection(path: Path = RAW_DIR / "infectious data_NLAS2b.xlsx") -> pd.D
     """
     df = pd.read_excel(path)
     df = df.rename(columns={"ID": "Agent", "Barn": "barn"})
-    return cast(pd.DataFrame, df.loc[:, ["Agent", "barn", "date", "LA", "RA"]])
+    return df[["Agent", "barn", "date", "LA", "RA"]]
 
 
-def load_exposure(mu=0.07, raw_dir=RAW_DIR):
+def load_exposure(mu: float | str = 0.07, raw_dir: Path = RAW_DIR) -> pd.DataFrame:
     """Exposição diária de cada vaca para um valor de mu (Tick 1440 = um dia)."""
     path = raw_dir / f"mu_{mu}_agent_exposure.csv"
     df = pd.read_csv(path, float_precision="round_trip")

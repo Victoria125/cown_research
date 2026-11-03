@@ -14,7 +14,7 @@ def cow(legs, start="2024-06-01", agent=1, barn=60):
 
 
 def status(legs):
-    return add_status(cow(legs))[["INFECTED", "C", "I", "S", "N", "Ct", "at_risk"]]
+    return add_status(cow(legs))[["INFECTED", "C", "I", "S", "N", "Ct", "at_risk", "legs_at_risk"]]
 
 
 def test_new_case_then_infected():
@@ -37,6 +37,16 @@ def test_second_leg_is_not_a_new_cow_case():
     assert s["C"].tolist() == [0, 1, 0]
     assert s["I"].tolist() == [0, 0, 1]
     assert s["Ct"].tolist() == [0, 1, 1]
+    assert s["legs_at_risk"].tolist() == [0, 2, 1]
+
+
+def test_leg_switch_is_a_new_leg_case_only():
+    # como a vaca 3370 em 29/08/2024: a direita sara e a esquerda adoece no mesmo dia
+    s = status([(0, 1), (1, 0)])
+    assert s["C"].tolist() == [0, 0]
+    assert s["I"].tolist() == [1, 1]
+    assert s["Ct"].tolist() == [0, 1]
+    assert s["legs_at_risk"].tolist() == [0, 1]
 
 
 def test_first_day_has_no_new_case():
