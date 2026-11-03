@@ -31,11 +31,16 @@ COLUMNS = [
 def exposure_window(daily: pd.DataFrame, days: int = WINDOW_DAYS) -> pd.DataFrame:
     """Soma de Exp nos `days` dias antes de cada data, por vaca (o próprio dia fica de fora).
 
-    Dias sem exposição não entram na soma; exp_days conta os dias que entraram.
+    Dias sem exposição não entram na soma; exp_days conta os dias que entraram. A soma é
+    feita direto sobre os 7 valores, porque a soma móvel do pandas deixa resíduos de
+    arredondamento (ex.: -1e-17 em vez de 0) depois que um valor grande sai da janela.
     """
-    by_cow = daily.sort_values(["Agent", "date"]).set_index("date").groupby("Agent")["Exp"]
-    window = by_cow.rolling(f"{days}D", closed="left")
-    return pd.DataFrame({"exp": window.sum(), "exp_days": window.count().fillna(0).astype(int)})
+    shifted = [
+        daily[["Agent", "date", "Exp"]].assign(date=daily["date"] + pd.Timedelta(days=lag))
+        for lag in range(1, days + 1)
+    ]
+    window = pd.concat(shifted).groupby(["Agent", "date"])["Exp"]
+    return pd.DataFrame({"exp": window.sum(min_count=1), "exp_days": window.count()})
 
 
 def build_weekly(daily: pd.DataFrame) -> pd.DataFrame:
@@ -48,9 +53,11 @@ def build_weekly(daily: pd.DataFrame) -> pd.DataFrame:
 
     weekly = daily[daily["date"].dt.dayofweek.eq(ASSESSMENT_WEEKDAY) & ~daily["first_day"]]
     weekly = weekly.join(exposure_window(daily), on=["Agent", "date"])
+    exp_days = weekly["exp_days"].fillna(0).astype(int)  # nenhum dia na janela
     weekly = weekly.assign(
         S=weekly["at_risk"].astype(int),
-        complete=weekly["exp_days"].eq(WINDOW_DAYS),
+        exp_days=exp_days,
+        complete=exp_days.eq(WINDOW_DAYS),
     )
     return weekly[COLUMNS].sort_values(["Agent", "date"]).reset_index(drop=True)
 

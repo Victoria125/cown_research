@@ -16,10 +16,12 @@ py -m venv .venv
 
 .\.venv\Scripts\python.exe -m src.daily 0.07    # data/processed/daily_mu0.07.parquet
 .\.venv\Scripts\python.exe -m src.weekly 0.07   # data/processed/weekly_mu0.07.parquet
+.\.venv\Scripts\python.exe -m src.glm           # data/processed/glm_*.parquet
 .\.venv\Scripts\pytest.exe
 ```
 
 Para outros valores de μ, basta passar mais de um valor: `python -m src.weekly 0.07 0.1`.
+Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb` (regressão).
 
 ## Arquivos gerados
 
@@ -30,6 +32,23 @@ Para outros valores de μ, basta passar mais de um valor: `python -m src.weekly 
 - **weekly**: uma linha por vaca por avaliação (quinta), a unidade da regressão. `S` e
   `legs_at_risk` são o status na véspera, `C` e `Ct` os casos novos na avaliação, `exp` a exposição
   somada nos 7 dias antes, `exp_days` quantos desses dias têm exposição e `complete` se são os 7.
+- **glm_pedvis_mu0.07**: os dois modelos com a exposição do PeDViS-BDD, com as semanas completas e
+  com os dias disponíveis.
+- **glm_barn_profile**: os dois modelos com a exposição por baia, para cada μ de 0,01 a 10 por dia.
+
+## Modelos
+
+- **Exposição do PeDViS-BDD** (arquivo do Gustavo): por vaca, a partir do rastreamento. Não dá
+  para recalcular: na mesma baia e no mesmo dia, as vacas têm exposições muito diferentes.
+- **Exposição por baia** (`src/barn.py`): as equações 2 e 3 de Chang & de Jong, com a escala
+  φ(μ) = μ² / (μ − 1 + e^−μ). A contaminação da baia cresce com as vacas infectadas e decai à taxa
+  μ; cada vaca recebe a exposição da baia dividida pelo número de vacas. Calcula qualquer μ, mas é
+  outro modelo: não reproduz o PeDViS-BDD.
+- **Regressão** (`src/glm.py`), por semana em risco:
+  - sem fundo, `p = 1 − exp(−β·exp)`: o GLM cloglog com offset log(exp) do artigo;
+  - com fundo, `p = 1 − exp(−(λ₀·7 + β·exp))`: λ₀ é o risco que não vem do piso.
+  Os dois são ajustados por máxima verossimilhança, com IC de β por perfil. μ é escolhido pelo
+  AIC; dAIC < 2 é compatível com os dados.
 
 ## Decisões
 
@@ -47,6 +66,14 @@ Para outros valores de μ, basta passar mais de um valor: `python -m src.weekly 
 - A regressão usa a tabela semanal, não as linhas diárias: os casos só aparecem nas quintas, então
   nos outros dias `C = 0` por construção.
 - A exposição da semana soma os 7 dias antes da avaliação; o próprio dia da avaliação fica de fora.
+  A soma é feita direto nos 7 valores, porque a soma móvel do pandas deixa resíduos de
+  arredondamento onde deveria dar zero.
+- Modelo por baia: a baia começa em equilíbrio com as vacas infectadas do primeiro dia, porque já
+  havia infectadas antes do início dos dados. Dias sem vacas na baia contam como zero infectadas.
+- O modelo sem fundo não admite caso com exposição zero, então essas semanas ficam de fora. No
+  perfil por baia, entram só as semanas com exposição > 0 em todos os μ, para os AIC serem
+  comparáveis. O modelo com fundo usa todas as semanas em risco.
+- Para comparar o PeDViS-BDD com o modelo por baia, os dois são ajustados nas mesmas semanas.
 - Vacas que só aparecem no arquivo de exposição ficam de fora (não têm status). Vaca-dias sem
   exposição ficam com `Exp` vazio, para não quebrar a sequência de status.
 

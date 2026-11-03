@@ -40,6 +40,13 @@ def test_missing_exposure_days_are_counted():
     assert not w["complete"].any()
 
 
+def test_week_without_exposure_sums_to_exactly_zero():
+    # um valor grande na primeira semana não pode deixar resíduo na segunda
+    exp = [1e6, 3.3, 1e-9, 7e5, 0.1, 2.0, 1e4] + [0.0] * 8
+    w = build_weekly(cow([(0, 0)] * 15, exp=exp))
+    assert w["exp"].tolist()[1] == 0.0
+
+
 def test_cow_entering_mid_week_has_incomplete_window():
     # entra no domingo 02/06, avaliada na quinta 06/06
     w = build_weekly(cow([(0, 0)] * 5, exp=[1.0] * 5, start="2024-06-02"))
