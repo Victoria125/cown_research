@@ -31,7 +31,8 @@ Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb`
   (vaca saudável no dia anterior) e `legs_at_risk` (patas saudáveis no dia anterior).
 - **weekly**: uma linha por vaca por avaliação (quinta), a unidade da regressão. `S` e
   `legs_at_risk` são o status na véspera, `C` e `Ct` os casos novos na avaliação, `exp` a exposição
-  somada nos 7 dias antes, `exp_days` quantos desses dias têm exposição e `complete` se são os 7.
+  somada nos 7 dias antes (do arquivo de exposição inteiro), `exp_days` quantos desses dias têm
+  exposição e `complete` se são os 7.
 - **glm_pedvis_mu0.07**: os dois modelos com a exposição do PeDViS-BDD, com as semanas completas e
   com os dias disponíveis.
 - **glm_barn_profile**: os dois modelos com a exposição por baia, para cada μ de 0,01 a 10 por dia.
@@ -68,6 +69,9 @@ Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb`
 - A exposição da semana soma os 7 dias antes da avaliação; o próprio dia da avaliação fica de fora.
   A soma é feita direto nos 7 valores, porque a soma móvel do pandas deixa resíduos de
   arredondamento onde deveria dar zero.
+- A janela do PeDViS-BDD soma o arquivo de exposição inteiro, não só os dias do arquivo de infecção:
+  a vaca pode sumir do arquivo de infecção por alguns dias com a exposição ainda registrada. O modelo
+  por baia só existe nos dias do arquivo de infecção.
 - Modelo por baia: a baia começa em equilíbrio com as vacas infectadas do primeiro dia, porque já
   havia infectadas antes do início dos dados. Dias sem vacas na baia contam como zero infectadas.
 - O modelo sem fundo não admite caso com exposição zero, então essas semanas ficam de fora. No
@@ -77,14 +81,40 @@ Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb`
 - Vacas que só aparecem no arquivo de exposição ficam de fora (não têm status). Vaca-dias sem
   exposição ficam com `Exp` vazio, para não quebrar a sequência de status.
 
+## Verificação
+
+Ferramentas para conferir, por outro caminho, tudo o que o pipeline faz:
+
+- `python -m verify.audit` grava `verify/report/audit_report.md` (fora do git, tem IDs de vacas). Confere
+  que os arquivos brutos são os anexos do e-mail (sha256), que nenhuma linha some sem explicação, as regras
+  contra o exemplo do Gustavo, o status contra as colunas NC/S/I do arquivo, uma reimplementação com laços
+  simples, a exposição por baia contra a integração numérica da EDO, a regressão contra o statsmodels e
+  contra dados simulados, e como o resultado muda com outras escolhas de janela.
+- `verify/lean_status/` prova em Lean 4 as regras de status (S + I + C = 1, caso novo só depois de dia
+  saudável, primeiro dia nunca é caso etc.), para as 20 combinações possíveis de patas. `lake build` confere
+  as provas; `tests/test_verification.py` confere que o Python dá a mesma resposta que o Lean.
+- `tests/test_verification.py` roda as verificações principais com o `pytest`.
+
+Achados da auditoria (16/11/2026):
+
+- **A janela de exposição perdia dias (corrigido).** Ela era montada a partir do arquivo diário, que só tem
+  os dias do arquivo de infecção. Quando a vaca sumia desse arquivo, a exposição desses dias ficava de fora,
+  mesmo existindo no arquivo de exposição: 165 semanas em risco (2 casos). Agora as semanas completas são
+  1.965, não 1.802, com 33 casos em vez de 31. A conclusão não mudou: com fundo, o melhor β continua zero.
+- **Com a exposição de 15 a 21 dias antes da avaliação**, o modelo com fundo prefere a exposição ao risco
+  constante (ΔAIC ≈ −6, p ≈ 0,002). Pode ser o tempo entre a infecção e a lesão ser vista; várias janelas foram
+  testadas, então só vale se houver motivo biológico para esse atraso.
+- **O arquivo de infecção se contradiz em 32 vaca-dias** (vacas 2611, 2678 e 4065): LA/RA e S/I/NC dizem
+  coisas diferentes. O código usa LA/RA.
+
 ## Pendências
 
 Perguntas para o Gustavo:
 
 1. Arquivos de exposição dos outros valores de μ.
 2. Por que 59 vacas só têm exposição e 15 vacas só têm status de infecção.
-3. A falta de exposição não é aleatória: exigir os 7 dias derruba 18% das semanas em risco (394 de
-   2.196), mas 26% dos casos (11 de 42). O que faz o rastreamento falhar perto dos casos (vaca
+3. A falta de exposição não é aleatória: exigir os 7 dias derruba 11% das semanas em risco (231 de
+   2.196), mas 21% dos casos (9 de 42). O que faz o rastreamento falhar perto dos casos (vaca
    tratada ou separada, tag sem bateria)? Na regressão, rodar as duas versões: (a) só semanas
    completas; (b) com os dias disponíveis.
 4. Três vacas já infectadas no primeiro dia (2941 e 3370 em 30/05/2024; 3733 em 17/10/2024): aqui

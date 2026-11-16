@@ -17,7 +17,7 @@ from scipy.stats import chi2
 
 from src.barn import add_barn_exposure
 from src.daily import build_daily
-from src.load import PROCESSED_DIR
+from src.load import PROCESSED_DIR, load_exposure
 from src.weekly import WINDOW_DAYS, build_weekly
 
 # decaimento por dia, de 0.01 a 10, mais o 0.07 do arquivo do Gustavo
@@ -135,7 +135,7 @@ def barn_profile(daily: pd.DataFrame, mus=MU_GRID, complete: bool = True) -> pd.
 
 def pedvis_fits(mu="0.07") -> pd.DataFrame:
     """Os dois modelos com a exposição do PeDViS-BDD, com semanas completas e com os dias disponíveis."""
-    weekly = build_weekly(build_daily(mu))
+    weekly = build_weekly(build_daily(mu), load_exposure(mu))
     fits = [
         fit_both(at_risk_weeks(weekly, complete)).assign(weeks_used=label)
         for complete, label in [(True, "7 dias de exposição"), (False, "dias disponíveis")]

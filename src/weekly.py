@@ -12,7 +12,7 @@ import argparse
 import pandas as pd
 
 from src.daily import build_daily
-from src.load import PROCESSED_DIR
+from src.load import PROCESSED_DIR, load_exposure
 
 ASSESSMENT_WEEKDAY = 3  # quinta
 WINDOW_DAYS = 7
@@ -28,23 +28,30 @@ COLUMNS = [
 ]
 
 
-def exposure_window(daily: pd.DataFrame, days: int = WINDOW_DAYS) -> pd.DataFrame:
+def exposure_window(exposure: pd.DataFrame, days: int = WINDOW_DAYS) -> pd.DataFrame:
     """Soma de Exp nos `days` dias antes de cada data, por vaca (o próprio dia fica de fora).
 
-    Dias sem exposição não entram na soma; exp_days conta os dias que entraram. A soma é
-    feita direto sobre os 7 valores, porque a soma móvel do pandas deixa resíduos de
-    arredondamento (ex.: -1e-17 em vez de 0) depois que um valor grande sai da janela.
+    `exposure` é uma tabela com Agent, date e Exp. Dias sem exposição não entram na soma;
+    exp_days conta os dias que entraram. A soma é feita direto sobre os 7 valores, porque a
+    soma móvel do pandas deixa resíduos de arredondamento (ex.: -1e-17 em vez de 0) depois
+    que um valor grande sai da janela.
     """
     shifted = [
-        daily[["Agent", "date", "Exp"]].assign(date=daily["date"] + pd.Timedelta(days=lag))
+        exposure[["Agent", "date", "Exp"]].assign(date=exposure["date"] + pd.Timedelta(days=lag))
         for lag in range(1, days + 1)
     ]
     window = pd.concat(shifted).groupby(["Agent", "date"])["Exp"]
     return pd.DataFrame({"exp": window.sum(min_count=1), "exp_days": window.count()})
 
 
-def build_weekly(daily: pd.DataFrame) -> pd.DataFrame:
-    """Uma linha por vaca por avaliação, a partir do arquivo diário de src.daily."""
+def build_weekly(daily: pd.DataFrame, exposure: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Uma linha por vaca por avaliação, a partir do arquivo diário de src.daily.
+
+    `exposure` é de onde sai a janela de exposição (Agent, date, Exp); por padrão, a coluna
+    Exp do próprio diário. Para o PeDViS-BDD, passe o arquivo de exposição inteiro
+    (load_exposure): o diário só tem os dias do arquivo de infecção, e a vaca pode sumir
+    dele por alguns dias com a exposição ainda registrada.
+    """
     daily = daily.sort_values(["Agent", "date"]).reset_index(drop=True)
     prev = daily.groupby("Agent")[["LA", "RA"]].shift()
     changed = ~daily["first_day"] & (daily["LA"].ne(prev["LA"]) | daily["RA"].ne(prev["RA"]))
@@ -52,7 +59,7 @@ def build_weekly(daily: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Status de perna mudou fora do dia de avaliação")
 
     weekly = daily[daily["date"].dt.dayofweek.eq(ASSESSMENT_WEEKDAY) & ~daily["first_day"]]
-    weekly = weekly.join(exposure_window(daily), on=["Agent", "date"])
+    weekly = weekly.join(exposure_window(daily if exposure is None else exposure), on=["Agent", "date"])
     exp_days = weekly["exp_days"].fillna(0).astype(int)  # nenhum dia na janela
     weekly = weekly.assign(
         S=weekly["at_risk"].astype(int),
@@ -70,7 +77,7 @@ def main():
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     for mu in args.mu:
         path = PROCESSED_DIR / f"weekly_mu{mu}.parquet"
-        build_weekly(build_daily(mu)).to_parquet(path, index=False)
+        build_weekly(build_daily(mu), load_exposure(mu)).to_parquet(path, index=False)
         print(f"{path.relative_to(PROCESSED_DIR.parents[1])}")
 
 

@@ -47,6 +47,19 @@ def test_week_without_exposure_sums_to_exactly_zero():
     assert w["exp"].tolist()[1] == 0.0
 
 
+def test_window_uses_exposure_of_days_missing_from_daily():
+    # a vaca some do arquivo de infecção de sábado a segunda (01/06 a 03/06), mas a
+    # exposição desses dias existe no arquivo de exposição
+    full = cow([(0, 0)] * 8, exp=[1.0] * 8)
+    gap = full["date"].between("2024-06-01", "2024-06-03")
+    daily = add_status(full.loc[~gap, ["Agent", "barn", "date", "LA", "RA", "Exp"]])
+    assert build_weekly(daily)["exp_days"].tolist() == [4]
+    w = build_weekly(daily, full[["Agent", "date", "Exp"]])
+    assert w["exp_days"].tolist() == [7]
+    assert w["exp"].tolist() == [7.0]
+    assert w["complete"].all()
+
+
 def test_cow_entering_mid_week_has_incomplete_window():
     # entra no domingo 02/06, avaliada na quinta 06/06
     w = build_weekly(cow([(0, 0)] * 5, exp=[1.0] * 5, start="2024-06-02"))

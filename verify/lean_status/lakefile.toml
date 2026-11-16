@@ -1,0 +1,10 @@
+name = "status"
+version = "0.1.0"
+defaultTargets = ["status_table"]
+
+[[lean_lib]]
+name = "Status"
+
+[[lean_exe]]
+name = "status_table"
+root = "Main"
