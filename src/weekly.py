@@ -19,7 +19,7 @@ WINDOW_DAYS = 7
 
 COLUMNS = [
     "Agent", "barn", "date",
-    # vaca: S = saudável na véspera (em risco), C = caso novo na avaliação
+    # vaca: S = em risco (saudável nas min_healthy avaliações anteriores), C = caso novo na avaliação
     "S", "C",
     # perna: quantas pernas estavam saudáveis na véspera, quantas viraram caso
     "legs_at_risk", "Ct",
@@ -28,29 +28,51 @@ COLUMNS = [
 ]
 
 
-def exposure_window(exposure: pd.DataFrame, days: int = WINDOW_DAYS) -> pd.DataFrame:
-    """Soma de Exp nos `days` dias antes de cada data, por vaca (o próprio dia fica de fora).
+def exposure_window(exposure: pd.DataFrame, days: int = WINDOW_DAYS, delay: int = 0) -> pd.DataFrame:
+    """Soma de Exp nos `days` dias que terminam `delay` dias antes de cada data, por vaca.
 
-    `exposure` é uma tabela com Agent, date e Exp. Dias sem exposição não entram na soma;
-    exp_days conta os dias que entraram. A soma é feita direto sobre os 7 valores, porque a
-    soma móvel do pandas deixa resíduos de arredondamento (ex.: -1e-17 em vez de 0) depois
-    que um valor grande sai da janela.
+    Com delay = 0, são os 7 dias antes da avaliação (o próprio dia fica de fora); com
+    delay = 7, os dias 8 a 14 antes, e assim por diante. `exposure` é uma tabela com
+    Agent, date e Exp. Dias sem exposição não entram na soma; exp_days conta os dias que
+    entraram. A soma é feita direto sobre os 7 valores, porque a soma móvel do pandas deixa
+    resíduos de arredondamento (ex.: -1e-17 em vez de 0) depois que um valor grande sai
+    da janela.
     """
     shifted = [
         exposure[["Agent", "date", "Exp"]].assign(date=exposure["date"] + pd.Timedelta(days=lag))
-        for lag in range(1, days + 1)
+        for lag in range(delay + 1, delay + days + 1)
     ]
     window = pd.concat(shifted).groupby(["Agent", "date"])["Exp"]
     return pd.DataFrame({"exp": window.sum(min_count=1), "exp_days": window.count()})
 
 
-def build_weekly(daily: pd.DataFrame, exposure: pd.DataFrame | None = None) -> pd.DataFrame:
+def healthy_before(daily: pd.DataFrame, min_healthy: int) -> pd.Series:
+    """Para cada linha, se a vaca estava saudável nas `min_healthy` checagens anteriores.
+
+    As checagens são as quintas e o primeiro dia da vaca: o status só muda nas quintas, então
+    a checagem anterior dá o status da véspera. Com min_healthy = 1 é o at_risk do diário;
+    com 2 ou mais, uma única avaliação saudável entre duas infectadas não basta para contar
+    um caso novo (a lesão pode só ter oscilado).
+    """
+    checks = daily[daily["date"].dt.dayofweek.eq(ASSESSMENT_WEEKDAY) | daily["first_day"]]
+    by_cow = checks.groupby("Agent")["INFECTED"]
+    healthy = pd.concat([by_cow.shift(j).eq(0) for j in range(1, min_healthy + 1)], axis=1).all(axis=1)
+    return healthy.reindex(daily.index, fill_value=False)
+
+
+def build_weekly(
+    daily: pd.DataFrame, exposure: pd.DataFrame | None = None, min_healthy: int = 1, delay: int = 0,
+) -> pd.DataFrame:
     """Uma linha por vaca por avaliação, a partir do arquivo diário de src.daily.
 
     `exposure` é de onde sai a janela de exposição (Agent, date, Exp); por padrão, a coluna
     Exp do próprio diário. Para o PeDViS-BDD, passe o arquivo de exposição inteiro
     (load_exposure): o diário só tem os dias do arquivo de infecção, e a vaca pode sumir
     dele por alguns dias com a exposição ainda registrada.
+
+    `min_healthy` é o número de avaliações saudáveis seguidas exigidas antes de um caso novo
+    (S = 1). `delay` atrasa a janela de exposição, para o tempo entre a infecção e a lesão
+    ser vista. Os padrões (1 e 0) são a definição original.
     """
     daily = daily.sort_values(["Agent", "date"]).reset_index(drop=True)
     prev = daily.groupby("Agent")[["LA", "RA"]].shift()
@@ -58,14 +80,13 @@ def build_weekly(daily: pd.DataFrame, exposure: pd.DataFrame | None = None) -> p
     if (changed & daily["date"].dt.dayofweek.ne(ASSESSMENT_WEEKDAY)).any():
         raise ValueError("Status de perna mudou fora do dia de avaliação")
 
+    daily = daily.assign(S=healthy_before(daily, min_healthy).astype(int))
     weekly = daily[daily["date"].dt.dayofweek.eq(ASSESSMENT_WEEKDAY) & ~daily["first_day"]]
-    weekly = weekly.join(exposure_window(daily if exposure is None else exposure), on=["Agent", "date"])
-    exp_days = weekly["exp_days"].fillna(0).astype(int)  # nenhum dia na janela
-    weekly = weekly.assign(
-        S=weekly["at_risk"].astype(int),
-        exp_days=exp_days,
-        complete=exp_days.eq(WINDOW_DAYS),
+    weekly = weekly.join(
+        exposure_window(daily if exposure is None else exposure, delay=delay), on=["Agent", "date"],
     )
+    exp_days = weekly["exp_days"].fillna(0).astype(int)  # nenhum dia na janela
+    weekly = weekly.assign(exp_days=exp_days, complete=exp_days.eq(WINDOW_DAYS))
     return weekly[COLUMNS].sort_values(["Agent", "date"]).reset_index(drop=True)
 
 

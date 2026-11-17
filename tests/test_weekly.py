@@ -60,6 +60,33 @@ def test_window_uses_exposure_of_days_missing_from_daily():
     assert w["complete"].all()
 
 
+def test_one_healthy_week_between_infections_is_a_case_only_with_k1():
+    # infectada na quinta 30/05, saudável na avaliação de 06/06, infectada de novo em 13/06
+    legs = [(1, 0)] * 7 + [(0, 0)] * 7 + [(1, 0)] * 8
+    daily = cow(legs, exp=[1.0] * len(legs))
+    k1 = build_weekly(daily)
+    assert k1["date"].dt.strftime("%d/%m").tolist() == ["06/06", "13/06", "20/06"]
+    assert k1["S"].tolist() == [0, 1, 0]
+    assert k1["C"].tolist() == [0, 1, 0]
+    assert build_weekly(daily, min_healthy=2)["S"].tolist() == [0, 0, 0]
+
+
+def test_two_healthy_weeks_put_the_cow_at_risk_with_k2():
+    legs = [(1, 0)] * 7 + [(0, 0)] * 14 + [(1, 0)] * 8
+    w = build_weekly(cow(legs, exp=[1.0] * len(legs)), min_healthy=2)
+    assert w["date"].dt.strftime("%d/%m").tolist() == ["06/06", "13/06", "20/06", "27/06"]
+    assert w["S"].tolist() == [0, 0, 1, 0]
+    assert w["C"].tolist() == [0, 0, 1, 0]
+
+
+def test_delay_moves_the_window_back():
+    # exposição 1 a 15 de 30/05 a 13/06; com 7 dias de atraso, 13/06 soma 30/05 a 05/06
+    w = build_weekly(cow([(0, 0)] * 15, exp=np.arange(1.0, 16.0)), delay=7)
+    assert w["date"].dt.strftime("%d/%m").tolist() == ["06/06", "13/06"]
+    assert w["exp_days"].tolist() == [0, 7]
+    assert w["exp"].tolist()[1] == 28.0
+
+
 def test_cow_entering_mid_week_has_incomplete_window():
     # entra no domingo 02/06, avaliada na quinta 06/06
     w = build_weekly(cow([(0, 0)] * 5, exp=[1.0] * 5, start="2024-06-02"))

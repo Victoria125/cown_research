@@ -17,11 +17,26 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m src.daily 0.07    # data/processed/daily_mu0.07.parquet
 .\.venv\Scripts\python.exe -m src.weekly 0.07   # data/processed/weekly_mu0.07.parquet
 .\.venv\Scripts\python.exe -m src.glm           # data/processed/glm_*.parquet
+.\.venv\Scripts\python.exe -m src.sensitivity   # data/processed/sensitivity_*.parquet (uns 20 min)
 .\.venv\Scripts\pytest.exe
 ```
 
 Para outros valores de μ, basta passar mais de um valor: `python -m src.weekly 0.07 0.1`.
 Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb` (regressão).
+
+## Versão em R
+
+`R/dd_functions.R` e `R/run_analysis.R` refazem a análise inteira em R (R base e `readxl`), com comentários
+em inglês: tabelas diária e semanal, os dois modelos, a definição de caso e o atraso.
+
+```powershell
+Rscript R/run_analysis.R                      # imprime as tabelas
+Rscript R/run_analysis.R pasta                # também grava as tabelas em CSV na pasta
+.\.venv\Scripts\python.exe -m verify.compare_r pasta   # confere o R contra o Python
+```
+
+As tabelas diária e semanal saem idênticas às do Python, e as estimativas iguais até 1e-4 relativo. Só os
+p de permutação e os intervalos de bootstrap variam um pouco, porque os sorteios são diferentes.
 
 ## Arquivos gerados
 
@@ -36,6 +51,12 @@ Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb`
 - **glm_pedvis_mu0.07**: os dois modelos com a exposição do PeDViS-BDD, com as semanas completas e
   com os dias disponíveis.
 - **glm_barn_profile**: os dois modelos com a exposição por baia, para cada μ de 0,01 a 10 por dia.
+- **sensitivity_case_definition**: os dois modelos com a janela original para cada definição de caso
+  (1, 2 ou 3 avaliações saudáveis antes do caso).
+- **sensitivity_delay** e **sensitivity_delay_profile**: o atraso entre infecção e lesão estimado para
+  cada definição de caso, com e sem as 3 vacas de dados contraditórios: perfil da verossimilhança,
+  IC do atraso, teste da exposição corrigido pela escolha do atraso (permutação) e IC de β e do
+  atraso por bootstrap de vacas.
 
 ## Modelos
 
@@ -78,6 +99,13 @@ Os resultados ficam em `notebooks/summary.ipynb` (dados) e `notebooks/glm.ipynb`
   perfil por baia, entram só as semanas com exposição > 0 em todos os μ, para os AIC serem
   comparáveis. O modelo com fundo usa todas as semanas em risco.
 - Para comparar o PeDViS-BDD com o modelo por baia, os dois são ajustados nas mesmas semanas.
+- Definição de caso (`min_healthy` em `src/weekly.py`): metade das "recaídas" (10 de 20) vem depois de uma
+  única avaliação saudável, o que pode ser a mesma lesão oscilando. Com `min_healthy = k`, a semana só está
+  em risco se a vaca estava saudável nas k checagens anteriores (as quintas e o primeiro dia). O padrão é 1,
+  a definição original. Com k ≥ 2, vacas recém-chegadas também precisam de k checagens antes de entrar.
+- Atraso (`delay`): a janela pode terminar alguns dias antes da avaliação, para o tempo entre a infecção e
+  a lesão ser vista. Em `src/sensitivity.py` o atraso é estimado pela verossimilhança (as mesmas semanas para
+  todos os atrasos), e o teste da exposição é corrigido pela escolha do atraso.
 - Vacas que só aparecem no arquivo de exposição ficam de fora (não têm status). Vaca-dias sem
   exposição ficam com `Exp` vazio, para não quebrar a sequência de status.
 
@@ -90,10 +118,19 @@ Ferramentas para conferir, por outro caminho, tudo o que o pipeline faz:
   contra o exemplo do Gustavo, o status contra as colunas NC/S/I do arquivo, uma reimplementação com laços
   simples, a exposição por baia contra a integração numérica da EDO, a regressão contra o statsmodels e
   contra dados simulados, e como o resultado muda com outras escolhas de janela.
+- `verify/lean_status/` também prova que exigir mais avaliações saudáveis (`min_healthy`) só tira casos,
+  nunca cria, e que k = 1 é a definição original; um teste confere o Python nas 90 combinações.
 - `verify/lean_status/` prova em Lean 4 as regras de status (S + I + C = 1, caso novo só depois de dia
   saudável, primeiro dia nunca é caso etc.), para as 20 combinações possíveis de patas. `lake build` confere
   as provas; `tests/test_verification.py` confere que o Python dá a mesma resposta que o Lean.
 - `tests/test_verification.py` roda as verificações principais com o `pytest`.
+- `python -m verify.claims` grava `verify/report/claims_report.md`: confere, uma por uma, as afirmações sobre os
+  dados, os resultados (com teste exato de Fisher, GEE por vaca e permutação para a escolha da janela) e o que
+  foi achado na internet (GitHub, Zenodo, Software Heritage), com um veredito para cada uma.
+- `verify/lean_math/` prova em Lean 4 com Mathlib que a regressão cloglog com offset log(exp) é o próprio modelo
+  de transmissão, que a exposição com um μ não determina a exposição com outro μ, a escala φ(μ) (incluindo a
+  integral do primeiro dia), a meia-vida com μ = 0,01 e a aritmética das frases sobre os resultados. Usa a
+  mesma versão da Mathlib de `cown_lean/` (`.lake/packages` pode ser um link para a pasta de lá).
 
 Achados da auditoria (16/11/2026):
 

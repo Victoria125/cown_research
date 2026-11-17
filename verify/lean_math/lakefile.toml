@@ -1,0 +1,10 @@
+name = "math_checks"
+version = "0.1.0"
+defaultTargets = ["MathChecks"]
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_lib]]
+name = "MathChecks"

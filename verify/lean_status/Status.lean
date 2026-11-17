@@ -88,6 +88,39 @@ theorem at_most_two_legs : ∀ prev now, (status prev now).ct ≤ 2 := by
 theorem case_has_new_leg : ∀ prev now, (status prev now).c = 1 → (status prev now).ct ≥ 1 := by
   all_cases
 
+/-! ## Definição de caso novo com k avaliações saudáveis (`min_healthy` em src/weekly.py)
+
+`h` é a lista das checagens anteriores da vaca, da mais recente para a mais antiga
+(true = infectada). -/
+
+/-- As `k` checagens mais recentes existem e são todas saudáveis. -/
+def healthyRun : Nat → List Bool → Bool
+  | 0, _ => true
+  | _ + 1, [] => false
+  | k + 1, b :: rest => !b && healthyRun k rest
+
+/-- Com k = 1, é a definição original: saudável na checagem anterior (a véspera). -/
+theorem healthyRun_one (b : Bool) (rest : List Bool) : healthyRun 1 (b :: rest) = !b := by
+  simp [healthyRun]
+
+/-- Exigir uma avaliação saudável a mais nunca coloca uma semana em risco que antes não estava. -/
+theorem healthyRun_mono : ∀ (k : Nat) (h : List Bool),
+    healthyRun (k + 1) h = true → healthyRun k h = true
+  | 0, _, _ => by simp [healthyRun]
+  | _ + 1, [], hk => by simp [healthyRun] at hk
+  | k + 1, b :: rest, hk => by
+    simp only [healthyRun, Bool.and_eq_true] at hk ⊢
+    exact ⟨hk.1, healthyRun_mono k rest hk.2⟩
+
+def isNewCase (k : Nat) (h : List Bool) (now : Bool) : Bool := healthyRun k h && now
+
+/-- Todo caso novo pela definição mais exigente também é caso pela menos exigente:
+aumentar k só tira casos, nunca cria. -/
+theorem stricter_definition_fewer_cases (k : Nat) (h : List Bool) (now : Bool) :
+    isNewCase (k + 1) h now = true → isNewCase k h now = true := by
+  simp only [isNewCase, Bool.and_eq_true]
+  exact fun ⟨hr, hn⟩ => ⟨healthyRun_mono k h hr, hn⟩
+
 /-- Pata nova sem caso novo de vaca só acontece se a vaca já estava infectada
 (segunda pata, ou troca de pata como a vaca 3370 em 29/08/2024). -/
 theorem new_leg_without_case_means_already_infected : ∀ p now,

@@ -49,6 +49,27 @@ def test_python_status_follows_the_rules_proved_in_lean():
             [row.INFECTED, row.C, row.I, row.S, row.Ct], row
 
 
+def test_case_definition_follows_the_rule_proved_in_lean():
+    """min_healthy em src/weekly.py contra healthyRun em verify/lean_status/Status.lean."""
+    lake = shutil.which("lake")
+    if lake is None:
+        pytest.skip("Lean (lake) não está instalado")
+    out = subprocess.run([lake, "exe", "status_table", "healthy-run"], cwd=ROOT / "verify" / "lean_status",
+                         capture_output=True, text=True, check=True, timeout=900)
+    table = pd.read_csv(io.StringIO(out.stdout), dtype={"history": str})
+    assert len(table) == 90
+    for row in table.itertuples():
+        # checagens anteriores, da mais antiga para a mais recente, uma por quinta
+        statuses = [int(s) for s in reversed(row.history)]
+        legs = [leg for s in statuses for leg in [(s, 0)] * 7] + [(1, 0)]
+        cow = pd.DataFrame({
+            "Agent": 1, "barn": 60, "date": pd.date_range("2024-05-30", periods=len(legs)),
+            "LA": [la for la, _ in legs], "RA": [ra for _, ra in legs], "Exp": 1.0,
+        })
+        weekly = build_weekly(add_status(cow), min_healthy=row.k)
+        assert weekly["S"].iloc[-1] == row.S, row
+
+
 # --------------------------------------------------------------- dados reais
 @pytest.fixture(scope="module")
 def pipeline():
@@ -93,6 +114,26 @@ def test_exposure_window_sums_the_whole_exposure_file(pipeline):
                      on=["Agent", "date"], suffixes=("", "_ind"))
     assert (w["exp_days"] == w["exp_days_ind"]).all()
     assert np.allclose(w["exp"].fillna(-1), w["exp_ind"].fillna(-1), rtol=1e-12, atol=0)
+
+
+@needs_data
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_case_definition_equals_independent_loop(pipeline, k):
+    """S com k avaliações saudáveis, refeito com um laço simples a partir do bruto."""
+    daily, _ = pipeline
+    ind = independent_status(read_raw_infection()).sort_values(["Agent", "date"])
+    expected = {}
+    for agent, g in ind.groupby("Agent"):
+        checks = []  # status nas checagens (primeiro dia e quintas)
+        for i, (date, infected) in enumerate(zip(g["date"], g["INFECTED"])):
+            is_thursday = date.dayofweek == 3
+            if is_thursday and i > 0:
+                expected[(agent, date)] = int(len(checks) >= k and all(s == 0 for s in checks[-k:]))
+            if is_thursday or i == 0:
+                checks.append(infected)
+    weekly = build_weekly(daily, load_exposure("0.07"), min_healthy=k)
+    got = dict(zip(zip(weekly["Agent"], weekly["date"]), weekly["S"]))
+    assert got == expected
 
 
 @needs_data
